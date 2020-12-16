@@ -58,6 +58,8 @@ class SMPL(nn.Module):
         body_pose: Optional[Tensor] = None,
         create_transl: bool = True,
         transl: Optional[Tensor] = None,
+        create_scaling: bool = True,
+        scaling: Optional[Tensor] = None,
         dtype=torch.float32,
         batch_size: int = 1,
         joint_mapper=None,
@@ -103,6 +105,12 @@ class SMPL(nn.Module):
                 of the body. (default = True)
             transl: torch.tensor, optional, Bx3
                 The default value for the transl variable.
+                (default = None)
+            create_scaling: bool, optional
+                Flag for creating a member variable for the scaling
+                of the body. (default = True)
+            scaling: torch.tensor, optional, 1x1 (shared across batch)
+                The default value for the scaling variable.
                 (default = None)
             dtype: torch.dtype, optional
                 The data type for the created variables
@@ -223,6 +231,16 @@ class SMPL(nn.Module):
             self.register_parameter(
                 'transl', nn.Parameter(default_transl, requires_grad=True))
 
+        if create_scaling:
+            if scaling is None:
+                default_scaling = torch.ones([1, 1],
+                                             dtype=dtype,
+                                             requires_grad=True)
+            else:
+                default_scaling = torch.tensor(scaling, dtype=dtype)
+            self.register_parameter(
+                'scaling', nn.Parameter(default_scaling, requires_grad=True))
+
         if v_template is None:
             v_template = data_struct.v_template
         if not torch.is_tensor(v_template):
@@ -291,6 +309,7 @@ class SMPL(nn.Module):
         body_pose: Optional[Tensor] = None,
         global_orient: Optional[Tensor] = None,
         transl: Optional[Tensor] = None,
+        scaling: Optional[Tensor] = None,
         return_verts=True,
         return_full_pose: bool = False,
         pose2rot: bool = True,
@@ -320,6 +339,9 @@ class SMPL(nn.Module):
                 instead. For example, it can used if the translation
                 `transl` is predicted from some external model.
                 (default=None)
+            scaling: torch.tensor, optional, shape 1x1
+                If given, ignore the member variable `scaling` and use it
+                instead. (default=None)
             return_verts: bool, optional
                 Return the vertices. (default=True)
             return_full_pose: bool, optional
@@ -338,7 +360,10 @@ class SMPL(nn.Module):
         apply_trans = transl is not None or hasattr(self, 'transl')
         if transl is None and hasattr(self, 'transl'):
             transl = self.transl
-
+        apply_scaling = scaling is not None or hasattr(self, 'scaling')
+        if scaling is None and hasattr(self, 'scaling'):
+            scaling = self.scaling
+            
         full_pose = torch.cat([global_orient, body_pose], dim=1)
 
         batch_size = max(betas.shape[0], global_orient.shape[0],
@@ -358,6 +383,9 @@ class SMPL(nn.Module):
         if self.joint_mapper is not None:
             joints = self.joint_mapper(joints)
 
+        if apply_scaling:
+            joints *= scaling.unsqueeze(dim=1)
+            vertices *= scaling.unsqueeze(dim=1)
         if apply_trans:
             joints += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
